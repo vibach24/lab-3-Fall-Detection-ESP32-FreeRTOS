@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Cảnh Báo Té Ngã</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #eef2f3; text-align: center; }
+        .card { background: white; padding: 20px; border-radius: 12px; display: inline-block; margin: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 250px; }
+        .val { font-size: 28px; font-weight: bold; color: #2980b9; }
+        .alert-box { background: #e74c3c; color: white; padding: 15px; margin: 20px auto; width: 80%; border-radius: 8px; font-size: 20px; font-weight: bold; display: none; }
+        .chart-box { width: 45%; display: inline-block; margin-top: 20px; background: white; padding: 10px; border-radius: 12px; }
+        button { padding: 10px 15px; margin: 5px; cursor: pointer; border: none; border-radius: 6px; font-weight: bold; color: white; }
+        .btn-on { background: #27ae60; } .btn-off { background: #7f8c8d; } .btn-reset { background: #e67e22; } .btn-mode { background: #8e44ad; }
+    </style>
+</head>
+<body>
+
+    <h2>Hệ Thống Theo Dõi Té Ngã (FreeRTOS + MQTT)</h2>
+    <div id="alarm" class="alert-box">🚨 CẢNH BÁO: ĐÃ PHÁT HIỆN TÉ NGÃ! 🚨</div>
+    
+    <!-- Yêu cầu: Các thẻ HTML hiển thị dạng số có class -->
+    <div>
+        <div class="card">
+            <h3>Gia Tốc Z (G)</h3>
+            <div id="val-z" class="val class-accel">0.00</div>
+        </div>
+        <div class="card">
+            <h3>Góc Pitch (Độ)</h3>
+            <div id="val-p" class="val class-pitch">0.00</div>
+        </div>
+        <div class="card">
+            <h3>Chế Độ</h3>
+            <div id="val-mode" class="val" style="color: #8e44ad">AUTO</div>
+        </div>
+    </div>
+
+    <!-- Yêu cầu: Nút nhấn điều khiển -->
+    <div style="margin: 20px; background: white; padding: 20px; border-radius: 12px; display: inline-block;">
+        <h3>Điều Khiển & Cảnh Báo</h3>
+        <button class="btn-mode" onclick="sendCmd('MODE_AUTO')">Chế độ AUTO</button>
+        <button class="btn-mode" onclick="sendCmd('MODE_MANUAL')">Chế độ MANUAL</button>
+        <br><br>
+        <button class="btn-on" onclick="sendCmd('LED_ON')">Bật LED (Manual)</button>
+        <button class="btn-off" onclick="sendCmd('LED_OFF')">Tắt LED (Manual)</button>
+        <button class="btn-on" onclick="sendCmd('BUZ_ON')">Bật Còi (Manual)</button>
+        <button class="btn-off" onclick="sendCmd('BUZ_OFF')">Tắt Còi (Manual)</button>
+        <br><br>
+        <button class="btn-reset" onclick="sendCmd('RESET')">↺ Reset Cảnh Báo Té Ngã</button>
+    </div>
+
+    <!-- Yêu cầu: 2 biểu đồ real-time -->
+    <div>
+        <div class="chart-box"><canvas id="accChart"></canvas></div>
+        <div class="chart-box"><canvas id="angleChart"></canvas></div>
+    </div>
+
+    <script>
+        // Cấu hình Biểu đồ
+        const accCtx = document.getElementById('accChart').getContext('2d');
+        const angleCtx = document.getElementById('angleChart').getContext('2d');
+        const accChart = new Chart(accCtx, { type: 'line', data: { labels: [], datasets: [{ label: 'Gia Tốc Z (G)', borderColor: '#2980b9', data: [] }] }});
+        const angleChart = new Chart(angleCtx, { type: 'line', data: { labels: [], datasets: [{ label: 'Góc Pitch (Độ)', borderColor: '#e74c3c', data: [] }] }});
+
+        // Kết nối MQTT (Dùng WebSocket cổng 8083)
+        const client = new Paho.MQTT.Client("broker.emqx.io", 8083, "web_" + new Date().getTime());
+
+        client.onMessageArrived = function(message) {
+            const data = JSON.parse(message.payloadString);
+            
+            // Cập nhật số
+            document.querySelector('.class-accel').innerText = data.az.toFixed(2);
+            document.querySelector('.class-pitch').innerText = data.pitch.toFixed(2);
+            document.getElementById('val-mode').innerText = data.mode;
+
+            // Cập nhật cảnh báo
+            document.getElementById('alarm').style.display = data.fall ? 'block' : 'none';
+
+            // Cập nhật biểu đồ
+            const timeStr = new Date().toLocaleTimeString();
+            if(accChart.data.labels.length > 15) {
+                accChart.data.labels.shift(); accChart.data.datasets[0].data.shift();
+                angleChart.data.labels.shift(); angleChart.data.datasets[0].data.shift();
+            }
+            accChart.data.labels.push(timeStr); accChart.data.datasets[0].data.push(data.az); accChart.update();
+            angleChart.data.labels.push(timeStr); angleChart.data.datasets[0].data.push(data.pitch); angleChart.update();
+        };
+
+        client.connect({ onSuccess: () => client.subscribe("fall/nhom01/data") });
+
+        function sendCmd(cmd) {
+            const message = new Paho.MQTT.Message(cmd);
+            message.destinationName = "fall/nhom01/control";
+            client.send(message);
+        }
+    </script>
+</body>
+</html>
